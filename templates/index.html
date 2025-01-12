@@ -1,23 +1,207 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
-    <title>Photo Editor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <title>Photo Magic</title>
 </head>
+
 <body>
-    <div id="controls-container">
-        <input type="file" id="file-input" accept="image/*">
-        <label for="brightness">Brightness:</label>
-        <input type="range" id="brightness" min="0" max="100" value="50">
-        <label for="contrast">Contrast:</label>
-        <input type="range" id="contrast" min="0" max="100" value="50">
+    <div class="container">
+        <h1>Photo Magic</h1>
+
+        <!-- Upload Form -->
+        <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
+            <label for="file">Upload an image:</label>
+            <input type="file" name="file" id="file" accept="image/*" required>
+            <button type="submit">Upload</button>
+        </form>
+
+        {% if image_path %}
+        <h2>Uploaded Image:</h2>
+        <div class="loader-overlay">
+            <div id="loader" class="loader hidden"></div>
+            <img id="uploaded-image" src="{{ url_for('uploaded_file', filename=image_path) }}" alt="Uploaded Image">
+        </div>
+
+        <!-- Filter Buttons -->
+        <div class="filters">
+            <button data-filter="grayscale">Grayscale</button>
+            <button data-filter="sepia">Sepia</button>
+            <button data-filter="negative">Negative</button>
+            <button data-filter="warm">Warm</button>
+            <button data-filter="cool">Cool</button>
+        </div>
+
+
+        <!-- Sliders for Brightness and Contrast -->
+        <div class="sliders">
+            <label for="brightness">Brightness</label>
+            <input type="range" id="brightness" min="-100" max="100" value="0">
+
+            <label for="contrast">Contrast</label>
+            <input type="range" id="contrast" min="-100" max="100" value="0">
+        </div>
+
+        <!-- Apply and Reset Buttons -->
+        <div class="apply-button">
+            <button id="apply-button">Apply</button>
+            <button id="reset-button">Reset</button>
+        </div>
+
+        <!-- Download Section -->
+        <div class="download-section">
+            <a id="download-button" href="#" download="photo-magic.png">
+                <button>Download</button>
+            </a>
+            <p id="download-notice" class="download-notice">Click "Apply" before downloading to ensure changes are
+                saved.</p>
+        </div>
+
+        <!-- Success Message -->
+        <div id="success-message" class="success-message hidden">🎉 Changes Applied!</div>
+        {% endif %}
     </div>
-    <div id="image-container">
-        <img id="image-preview" src="" alt="Image Preview">
-    </div>
-    <button id="download-btn" style="display:none;">Download</button>
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+
+    <!-- JavaScript Logic -->
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const uploadedImage = document.getElementById("uploaded-image");
+            const loader = document.getElementById("loader");
+            const successMessage = document.getElementById("success-message");
+            const downloadButton = document.getElementById("download-button");
+
+            // Function to show/hide the loader
+            function toggleLoader(show) {
+                loader.style.display = show ? "block" : "none";
+            }
+
+            // Function to show success message
+            function showSuccessMessage() {
+                successMessage.classList.remove("hidden");
+                successMessage.classList.add("fade-in");
+
+                setTimeout(() => {
+                    successMessage.classList.add("fade-out");
+                    setTimeout(() => {
+                        successMessage.classList.add("hidden");
+                        successMessage.classList.remove("fade-in", "fade-out");
+                    }, 1000);
+                }, 2000);
+            }
+
+            // Handle filter application
+            document.querySelectorAll(".filters button").forEach(button => {
+                button.addEventListener("click", async () => {
+                    // Remove the "active" class from all buttons
+                    document.querySelectorAll(".filters button").forEach(btn => btn.classList.remove("active"));
+
+                    // Add the "active" class to the clicked button
+                    button.classList.add("active");
+
+                    // Fetch and apply the filter
+                    const filterName = button.getAttribute("data-filter");
+                    toggleLoader(true);
+
+                    try {
+                        const response = await fetch(`/apply_filter/${filterName}`, { method: "POST" });
+                        const data = await response.json();
+
+                        uploadedImage.src = `${data.filtered_image_url}?t=${new Date().getTime()}`;
+                        resetSliders();
+                    } catch (error) {
+                        console.error("Error applying filter:", error);
+                    } finally {
+                        toggleLoader(false);
+                    }
+                });
+            });
+
+
+            // Debounce function to limit the frequency of API calls
+            function debounce(func, wait) {
+                let timeout;
+                return function (...args) {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => func.apply(this, args), wait);
+                };
+            }
+
+            // Adjust the image based on brightness and contrast sliders
+            const adjustImageDebounced = debounce(async function () {
+                toggleLoader(true);
+
+                const brightness = document.getElementById("brightness").value;
+                const contrast = document.getElementById("contrast").value;
+
+                try {
+                    const formData = new FormData();
+                    formData.append("brightness", brightness);
+                    formData.append("contrast", contrast);
+
+                    const response = await fetch("/adjust_image", { method: "POST", body: formData });
+                    const data = await response.json();
+
+                    uploadedImage.src = `${data.adjusted_image_url}?t=${new Date().getTime()}`;
+                    toggleLoader(false);
+                } catch (error) {
+                    toggleLoader(false);
+                    console.error("Error adjusting image:", error);
+                }
+            }, 400); // Trigger after 1.5 seconds of inactivity on the slider
+
+            // Attach debounced function to sliders
+            document.getElementById("brightness").addEventListener("input", adjustImageDebounced);
+            document.getElementById("contrast").addEventListener("input", adjustImageDebounced);
+
+            // Handle apply changes
+            document.getElementById("apply-button").addEventListener("click", async () => {
+                toggleLoader(true);
+
+                try {
+                    const response = await fetch("/apply_changes", { method: "POST" });
+                    const data = await response.json();
+
+                    uploadedImage.src = `${data.new_image_url}?t=${new Date().getTime()}`;
+                    resetSliders();
+                    downloadButton.href = uploadedImage.src;
+                    toggleLoader(false);
+                    showSuccessMessage();
+                } catch (error) {
+                    toggleLoader(false);
+                    console.error("Error applying changes:", error);
+                }
+            });
+
+            // Handle reset to original
+            document.getElementById("reset-button").addEventListener("click", () => {
+                resetSliders();
+                uploadedImage.src = `/uploads/{{ image_path }}?t=${new Date().getTime()}`;
+
+                // Remove the "active" class from all filter buttons
+                document.querySelectorAll(".filters button").forEach(button => button.classList.remove("active"));
+
+                // Clear out any adjusted or filtered images
+                fetch("/clear_duplicates", { method: "POST" })
+                    .then(() => console.log("Duplicates cleared."))
+                    .catch(error => console.error("Error clearing duplicates:", error));
+            });
+
+
+            // Reset sliders
+            function resetSliders() {
+                document.getElementById("brightness").value = 0;
+                document.getElementById("contrast").value = 0;
+            }
+
+            // Clear images on page unload
+            window.addEventListener("beforeunload", () => {
+                fetch("/clear_images", { method: "POST" });
+            });
+        });
+    </script>
 </body>
+
 </html>
